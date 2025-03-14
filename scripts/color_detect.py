@@ -125,29 +125,29 @@ def detect_color_blocks(img: np.ndarray, frame_count: int) -> Tuple[List[Tuple[i
 
     try:
         # 保存原始图像
-        save_debug_image('original', img, frame_count)
+        # save_debug_image('original', img, frame_count)
 
         # 图像预处理
         processed_img, scale = preprocess_image(img)
-        save_debug_image('preprocessed', processed_img, frame_count)
+        # save_debug_image('preprocessed', processed_img, frame_count)
 
         result_image = img.copy()
 
         # 转换到HSV颜色空间
         hsv = cv2.cvtColor(processed_img, cv2.COLOR_BGR2HSV)
-        save_debug_image('hsv', hsv, frame_count)
+        # save_debug_image('hsv', hsv, frame_count)
 
         centers_dict = {}
         for color_name, color_config in CONFIG['colors'].items():
             # 创建颜色掩码
             mask = create_color_mask(hsv, color_config['ranges'])
-            save_debug_image(f'mask_{color_name}', mask, frame_count)
+            # save_debug_image(f'mask_{color_name}', mask, frame_count)
 
             # 形态学操作改善掩码质量
             kernel = np.ones((5, 5), np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-            save_debug_image(f'mask_{color_name}_morphology', mask, frame_count)
+            # save_debug_image(f'mask_{color_name}_morphology', mask, frame_count)
 
             # 查找轮廓
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -155,9 +155,17 @@ def detect_color_blocks(img: np.ndarray, frame_count: int) -> Tuple[List[Tuple[i
             # 处理轮廓
             centers = process_contours(contours, color_name, result_image, scale)
             centers_dict[color_name] = centers
-
+            
+            # 输出检测到的色块中心坐标
+            if centers:
+                print(f"{color_name}  detected:")
+                for i, (cx, cy) in enumerate(centers):
+                    print(f"  Block {i+1}: ({cx}, {cy})")
+            else:
+                print(f"No {color_name} blocks detected")
+                
         # 保存最终结果
-        save_debug_image('final_result', result_image, frame_count)
+        # save_debug_image('final_result', result_image, frame_count)
 
         # 显示结果
         cv2.imshow("detected_colors", result_image)
@@ -212,5 +220,5 @@ if __name__ == "__main__":
         video_detect(video_path)
 
     elif CONFIG['run_mode'] == 'release':
-        
+
         video_detect(video_path)
