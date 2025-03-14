@@ -1,8 +1,14 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
 import cv2
 import numpy as np
 from typing import Tuple, List, Optional
 import os
 import time
+import rospy
+from sensor_msgs.msg import Image
+from std_msgs.msg import String
+from cv_bridge import CvBridge
 
 # 配置参数
 CONFIG = {
@@ -138,6 +144,8 @@ def detect_color_blocks(img: np.ndarray, frame_count: int) -> Tuple[List[Tuple[i
         # save_debug_image('hsv', hsv, frame_count)
 
         centers_dict = {}
+        result_json = { "detections": []}
+        
         for color_name, color_config in CONFIG['colors'].items():
             # 创建颜色掩码
             mask = create_color_mask(hsv, color_config['ranges'])
@@ -154,15 +162,15 @@ def detect_color_blocks(img: np.ndarray, frame_count: int) -> Tuple[List[Tuple[i
 
             # 处理轮廓
             centers = process_contours(contours, color_name, result_image, scale)
-            centers_dict[color_name] = centers
             
-            # 输出检测到的色块中心坐标
-            if centers:
-                print(f"{color_name}  detected:")
-                for i, (cx, cy) in enumerate(centers):
-                    print(f"  Block {i+1}: ({cx}, {cy})")
-            else:
-                print(f"No {color_name} blocks detected")
+            # 构建结果字符串
+
+            if centers:     # 构建 JSON 结果
+                for cx, cy in centers:
+                    result_json["color_detection"].append({
+                        "color": color_name,
+                        "position": {"x": cx, "y": cy}
+                    })
                 
         # 保存最终结果
         # save_debug_image('final_result', result_image, frame_count)
@@ -171,54 +179,54 @@ def detect_color_blocks(img: np.ndarray, frame_count: int) -> Tuple[List[Tuple[i
         cv2.imshow("detected_colors", result_image)
         cv2.waitKey(1)
 
-        return centers_dict['red'], centers_dict['green']
+        return result_json
 
     except Exception as e:
         print(f"颜色检测失败: {str(e)}")
-        return [], []
+        return [], [], []
 
-def video_detect(video_path: str):
-    """视频检测主函数"""
+class ColorDetector:
+    def __init__(self):
+        rospy.init_node('color_detector', anonymous=True)
+        self.bridge = CvBridge()
+        self.frame_count = 0
+        
+        # 创建发布者
+        self.result_pub = rospy.Publisher('/detect_result', String, queue_size=10)
+        
+        # 创建订阅者
+        self.image_sub = rospy.Subscriber('/camera_f/color/image_raw', Image, self.image_callback)
+        
+        print("Color detector node initialized")
 
+    def image_callback(self, data):
+        try:
+            # 将ROS图像消息转换为OpenCV格式
+            cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+            
+            # 检测颜色块
+             result_strings = detect_color_blocks(cv_image, self.frame_count)
+            
+            # 发布检测结果
+            if result_strings:
+                result_msg = String()
+                result_msg.data = result_strings
+                self.result_pub.publish(result_msg)
+            
+            self.frame_count += 1
+            
+        except Exception as e:
+            rospy.logerr(f"Error processing image: {str(e)}")
 
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"无法打开视频: {video_path}")
-        return
-
-    try:
-        frame_count = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                print("视频读取结束")
-                break
-
-            detect_color_blocks(frame, frame_count)
-            frame_count += 1
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-    except Exception as e:
-        print(f"视频处理出错: {str(e)}")
-
-    finally:
-        cap.release()
-        cv2.destroyAllWindows()
+    def run(self):
+        rospy.spin()
 
 if __name__ == "__main__":
-    video_path = "../data/aim_data/aim_1.avi"
+    try:
 
-    if CONFIG['run_mode'] == 'debug':
-    # 清空并创建可视化目录
-        if os.path.exists(CONFIG['visualization_dir']):
-            for file in os.listdir(CONFIG['visualization_dir']):
-                os.remove(os.path.join(CONFIG['visualization_dir'], file))
-        ensure_dir(CONFIG['visualization_dir'])
-
-        video_detect(video_path)
-
-    elif CONFIG['run_mode'] == 'release':
-
-        video_detect(video_path)
+        detector = ColorDetector()
+        detector.run()
+    except rospy.ROSInterruptException:
+        pass
+    finally:
+        cv2.destroyAllWindows()
