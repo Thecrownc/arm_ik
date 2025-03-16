@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import time
 from collections import deque
+import math
 
 class VideoColorRectangleDetector:
     def __init__(self, video_source=0, target_fps=30, min_continuous_frames=3):
@@ -125,22 +126,95 @@ class VideoColorRectangleDetector:
             list: 检测到的矩形中心点坐标
         """
         centers = []
+        
+        # 首先检测圆形
+        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+        cv2.drawContours(mask, contours, -1, 255, -1)
+        circles = self._detect_circles(mask)
+        
+        # 在调试模式下绘制检测到的圆形
+        if self.debug_mode:
+            for cx, cy, r in circles:
+                # 绘制圆形
+                cv2.circle(frame, (cx, cy), r, (255, 255, 0), 2)  # 黄色显示圆形
+                # 绘制圆心
+                cv2.circle(frame, (cx, cy), 2, (255, 255, 0), 3)
+                # 显示半径
+                cv2.putText(frame, f"R:{r}", (cx-20, cy-20),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        
+        # 相机参数 - 这些应该通过相机标定获取
+        focal_length = 1000.0  # 焦距（像素单位）
+        known_width = 0.05  # 已知物体宽度（米）
+        known_area = 0.0025  # 已知物体面积（平方米）
+        
+        # 面积-距离乘积常数（通过实验标定）
+        # 这个值应该通过实际测量获得：在已知距离处测量物体的像素面积
+        area_distance_product = 1000000  # 示例值
+        
         for contour in contours:
             # 过滤小轮廓以减少噪声
             area = cv2.contourArea(contour)
-            if area > 3000:
-                # 计算周长和近似多边形
+            if area > 4000:
+                # 获取最小外接矩形
+                rect = cv2.minAreaRect(contour)
+                box = cv2.boxPoints(rect)
+                box = np.int0(box)
+                
+                # 计算矩形的宽和高
+                width = rect[1][0]
+                height = rect[1][1]
+                
+                # 计算长宽比
+                aspect_ratio = width / height
+                
+                # 计算矩形度（轮廓面积与最小外接矩形面积之比）
+                rect_area = width * height
+                rectangularity = area / rect_area if rect_area > 0 else 0
+                
+                # 计算轮廓的圆形度
                 perimeter = cv2.arcLength(contour, True)
-                approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
-
-                # 只处理矩形（顶点数为4的形状）
-                if len(approx) == 4:
-                    x, y, w, h = cv2.boundingRect(contour)
-                    # 计算并标记中心点
-                    center_x = x + w // 2
-                    center_y = y + h // 2
-                    centers.append((center_x, center_y))
-        
+                circularity = 4 * np.pi * area / (perimeter * perimeter) if perimeter > 0 else 0
+                
+                # 计算中心点
+                center_x = int(rect[0][0])
+                center_y = int(rect[0][1])
+                
+                # 检查中心点是否在任何检测到的圆形内
+                if not self._is_point_in_circles((center_x, center_y), circles):
+                    # 估计距离 - 使用面积反比定律
+                    # 距离 = sqrt(面积-距离乘积常数 / 像素面积)
+                    estimated_distance = math.sqrt(area_distance_product / area)
+                    
+                    # 或者使用已知宽度估计距离
+                    # 距离 = 焦距 * 已知宽度 / 像素宽度
+                    distance_by_width = focal_length * known_width / width
+                    
+                    # 在调试模式下绘制轮廓和特征
+                    if self.debug_mode:
+                        # 绘制轮廓
+                        cv2.drawContours(frame, [box], 0, color, 2)
+                        # 绘制中心点
+                        cv2.circle(frame, (center_x, center_y), 5, color, -1)
+                        # 显示特征值
+                        cv2.putText(frame, f"R:{rectangularity:.2f}", (center_x-40, center_y-40),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        cv2.putText(frame, f"C:{circularity:.2f}", (center_x-40, center_y-20),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        # 显示宽和高
+                        cv2.putText(frame, f"W:{int(width)}", (center_x-40, center_y),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        cv2.putText(frame, f"H:{int(height)}", (center_x-40, center_y+20),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        # 显示长宽比
+                        cv2.putText(frame, f"AR:{aspect_ratio:.2f}", (center_x-40, center_y+40),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        # 显示估计距离
+                        cv2.putText(frame, f"D:{estimated_distance:.2f}m", (center_x-40, center_y+60),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                    
+                    # 将距离信息添加到中心点数据中
+                    centers.append((center_x, center_y, width, height, estimated_distance))
         
         return centers
     
