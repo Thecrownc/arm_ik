@@ -1,0 +1,9 @@
+# Request
+string camera_topic     # 需要订阅的相机话题名称
+---
+# Response
+string color           # 检测到的颜色名称
+float32 x              # 颜色块中心点x坐标（相对于图像中心）
+float32 y              # 颜色块中心点y坐标（相对于图像中心）
+float32 area           # 颜色块面积
+float32 area_percentage # 颜色块面积占总图像的百分比
